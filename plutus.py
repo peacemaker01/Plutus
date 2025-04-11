@@ -11,8 +11,11 @@ import binascii
 import os
 import sys
 import time
+from pybloom_live import BloomFilter
 
-DATABASE = r'database/11_13_2022/'
+DATABASE = r'plutus/database/11_13_2022/' # Adjust path if needed
+EXPECTED_ITEMS = 45000000  # A bit more than your database size
+FALSE_POSITIVE_RATE = 0.001 # Adjust as needed
 
 def generate_private_key():
     return binascii.hexlify(os.urandom(32)).decode('utf-8').upper()
@@ -59,16 +62,16 @@ def private_key_to_wif(private_key):
         else: break
     return chars[0] * pad + result
 
-def main(database, args):
+def main(bloom_filter, args): # Changed the argument to accept the Bloom filter
     while True:
         private_key = generate_private_key()
-        public_key = private_key_to_public_key(private_key, args['fastecdsa']) 
+        public_key = private_key_to_public_key(private_key, args['fastecdsa'])
         address = public_key_to_address(public_key)
 
         if args['verbose']:
             print(address)
-        
-        if address[-args['substring']:] in database:
+
+        if address[-args['substring']:] in bloom_filter: # Check against the Bloom filter first
             for filename in os.listdir(DATABASE):
                 with open(DATABASE + filename) as file:
                     if address in file.read():
@@ -84,7 +87,7 @@ def print_help():
 Plutus QA support: https://github.com/Isaacdelly/Plutus/issues
 
 
-Speed test: 
+Speed test:
 execute 'python3 plutus.py time', the output will be the time it takes to bruteforce a single address in seconds
 
 
@@ -116,7 +119,7 @@ if __name__ == '__main__':
         'fastecdsa': platform.system() in ['Linux', 'Darwin'],
         'cpu_count': multiprocessing.cpu_count(),
     }
-    
+
     for arg in sys.argv[1:]:
         command = arg.split('=')[0]
         if command == 'help':
@@ -147,19 +150,19 @@ if __name__ == '__main__':
         else:
             print('invalid input: ' + command  + '\nrun `python3 plutus.py help` for help')
             sys.exit(-1)
-    
-    print('reading database files...')
-    database = set()
+
+    print('reading database files and populating Bloom filter...')
+    bloom_filter = BloomFilter(capacity=EXPECTED_ITEMS, error_rate=FALSE_POSITIVE_RATE)
     for filename in os.listdir(DATABASE):
         with open(DATABASE + filename) as file:
             for address in file:
                 address = address.strip()
                 if address.startswith('1'):
-                    database.add(address[-args['substring']:])
-    print('DONE')
+                    bloom_filter.add(address[-args['substring']:])
+    print('DONE populating Bloom filter')
 
-    print('database size: ' + str(len(database)))
+    print('database size: ' + str(EXPECTED_ITEMS)) # Using expected items for clarity
     print('processes spawned: ' + str(args['cpu_count']))
-    
+
     for cpu in range(args['cpu_count']):
-        multiprocessing.Process(target = main, args = (database, args)).start()
+        multiprocessing.Process(target = main, args = (bloom_filter, args)).start() # Pass the Bloom filter to the main function
